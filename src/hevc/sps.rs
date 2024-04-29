@@ -12,7 +12,7 @@ pub struct SPSNAL {
     max_sub_layers: u8,
     temporal_id_nesting_flag: bool,
 
-    ptl: ProfileTierLevel,
+    pub ptl: ProfileTierLevel,
     pub(crate) sps_id: u64,
     chroma_format_idc: u64,
     pub(crate) separate_colour_plane_flag: bool,
@@ -222,4 +222,59 @@ impl SPSNAL {
 
         Ok(sps)
     }
+
+    pub fn dimensions(&self) -> (u64, u64) {
+        (self.width, self.height)
+    }
+
+    // this is to be used to get video size.
+    // Got the cropping logic from chromium's h265_parser.cc::GetVisibleRect()
+    pub fn visible_rectangle(&self) -> Option<(u16, u16)> {
+        let (width, height) = self.dimensions();
+        let (sub_width_c, sub_height_c) = match self.chroma_format_idc {
+            1 => (2, 2),
+            2 => (2, 1),
+            _ => (1, 1),
+        };
+
+        // Take cropping into consideration
+        let left = (self.conf_win_left_offset + self.vui_parameters.def_disp_win_left_offset)
+            * sub_width_c;
+        let right = (self.conf_win_right_offset + self.vui_parameters.def_disp_win_right_offset)
+            * sub_width_c;
+        let top =
+            (self.conf_win_top_offset + self.vui_parameters.def_disp_win_top_offset) * sub_height_c;
+        let bottom = (self.conf_win_bottom_offset + self.vui_parameters.def_disp_win_bottom_offset)
+            * sub_height_c;
+
+        let height_crop = top + bottom;
+        let width_crop = left + right;
+
+        if let (Some(w), Some(h)) = (
+            width.checked_sub(width_crop),
+            height.checked_sub(height_crop),
+        ) {
+            return Some((w as u16, h as u16));
+        }
+        None
+    }
+
+    pub fn chroma_format(&self) -> u8 {
+        self.chroma_format_idc as u8
+    }
+
+    pub fn frame_rate(&self) -> Option<f32> {
+        if self.vui_present {
+            return self.vui_parameters.frame_rate();
+        }
+        None
+    }
+
+    pub fn aspect_ratio(&self) -> Option<(u16, u16)> {
+        if self.vui_present {
+            return self.vui_parameters.aspect_ratio();
+        }
+        None
+    }
+
 }

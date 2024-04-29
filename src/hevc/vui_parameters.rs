@@ -28,10 +28,10 @@ pub struct VuiParameters {
     frame_field_info_present_flag: bool,
 
     default_display_window_flag: bool,
-    def_disp_win_left_offset: u64,
-    def_disp_win_right_offset: u64,
-    def_disp_win_top_offset: u64,
-    def_disp_win_bottom_offset: u64,
+    pub def_disp_win_left_offset: u64,
+    pub def_disp_win_right_offset: u64,
+    pub def_disp_win_top_offset: u64,
+    pub def_disp_win_bottom_offset: u64,
 
     vui_timing_info_present_flag: bool,
     vui_num_units_in_tick: u32,
@@ -134,5 +134,42 @@ impl VuiParameters {
         }
 
         Ok(vui)
+    }
+
+    pub fn aspect_ratio(&self) -> Option<(u16, u16)> {
+        if self.sar_present {
+            if self.sar_idx == 255 {
+                return Some((self.sar_num, self.sar_den));
+            }
+
+            return match self.sar_idx {
+                1 => Some((1, 1)),
+                2 => Some((12, 11)),
+                3 => Some((10, 11)),
+                4 => Some((16, 11)),
+                5 => Some((40, 33)),
+                6 => Some((24, 11)),
+                7 => Some((20, 11)),
+                8 => Some((32, 11)),
+                9 => Some((80, 33)),
+                10 => Some((18, 11)),
+                11 => Some((15, 11)),
+                12 => Some((64, 33)),
+                13 => Some((160, 99)),
+                14 => Some((4, 3)),
+                15 => Some((3, 2)),
+                16 => Some((2, 1)),
+                _ => None,
+            };
+        }
+        None
+    }
+
+    pub fn frame_rate(&self) -> Option<f32> {
+        if self.vui_timing_info_present_flag {
+            return Some(self.vui_time_scale as f32 / self.vui_num_units_in_tick as f32);
+        }
+
+        None
     }
 }

@@ -9,7 +9,7 @@ pub mod utils;
 use hevc::*;
 use pps::PPSNAL;
 use slice::SliceNAL;
-use sps::SPSNAL;
+pub use sps::SPSNAL;
 use vps::VPSNAL;
 
 use utils::clear_start_code_emulation_prevention_3_byte;
@@ -399,6 +399,20 @@ impl HevcParser {
     pub fn get_nals(&self) -> &Vec<NALUnit> {
         &self.nals
     }
+
+    pub fn parse_nalunits(&mut self, data: &[u8]) {
+        let mut offsets = vec![];
+        self.get_offsets(&data, &mut offsets);
+
+        if let Some(last_offset) = offsets.pop() {
+            let _x = self.split_nals(data, &offsets, last_offset, true);
+        }
+    }
+
+    pub fn get_sps(&self) -> &Vec<SPSNAL> {
+        &self.sps
+    }
+
 }
 
 impl Default for NALUStartCode {
