@@ -83,7 +83,10 @@ impl HevcParser {
                         NALUStartCode::Length4 => HEADER_LEN_4,
                     };
                 }
-                _ => return,
+                _ => {
+                    println!("Non consumed data: {:?}", &data[consumed..]);    
+                    return 
+                },
             }
         }
     }
