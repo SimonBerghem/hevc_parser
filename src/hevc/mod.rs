@@ -31,6 +31,7 @@ pub const NAL_BLA_N_LP: u8 = 18;
 pub const NAL_IDR_W_RADL: u8 = 19;
 pub const NAL_IDR_N_LP: u8 = 20;
 pub const NAL_CRA_NUT: u8 = 21;
+pub const NAL_IRAP_VCL22: u8 = 22;
 pub const NAL_IRAP_VCL23: u8 = 23;
 pub const NAL_VPS: u8 = 32;
 pub const NAL_SPS: u8 = 33;

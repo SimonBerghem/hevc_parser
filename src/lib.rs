@@ -12,6 +12,9 @@ use slice::SliceNAL;
 pub use sps::SPSNAL;
 use vps::VPSNAL;
 
+use std::fs::File;
+use std::io::prelude::*;
+
 use utils::clear_start_code_emulation_prevention_3_byte;
 
 // We don't want to parse large slices because the memory is copied
@@ -27,17 +30,19 @@ pub enum NALUStartCode {
     Length4,
 }
 
-#[derive(Default)]
 pub struct HevcParser {
     reader: BitVecReader,
     pub nalu_start_code: NALUStartCode,
 
     nals: Vec<NALUnit>,
+    incomplete_nals: Vec<u8>,
     vps: Vec<VPSNAL>,
     sps: Vec<SPSNAL>,
     pps: Vec<PPSNAL>,
     ordered_frames: Vec<Frame>,
     frames: Vec<Frame>,
+
+    key_frames: *mut [Vec<u8>;2],
 
     poc: u64,
     poc_tid0: u64,
@@ -48,15 +53,28 @@ pub struct HevcParser {
 }
 
 impl HevcParser {
+    pub fn new(key_frame_data: *mut [Vec<u8>;2]) -> HevcParser {
+        HevcParser {
+            reader: Default::default(),
+            nalu_start_code: Default::default(),
+            nals: Default::default(),
+            incomplete_nals: Default::default(),
+            vps: Default::default(),
+            sps: Default::default(),
+            pps: Default::default(),
+            ordered_frames: Default::default(),
+            frames: Default::default(),
+            key_frames: key_frame_data,
+            poc: Default::default(),
+            poc_tid0: Default::default(),
+            current_frame: Default::default(),
+            decoded_index: Default::default(),
+            presentation_index: Default::default(),            
+        }
+    }
+    
     fn take_until_nal<'a>(tag: &[u8], data: &'a [u8]) -> IResult<&'a [u8], &'a [u8]> {
         take_until(tag)(data)
-    }
-
-    pub fn with_nalu_start_code(start_code: NALUStartCode) -> HevcParser {
-        HevcParser {
-            nalu_start_code: start_code,
-            ..Default::default()
-        }
     }
 
     pub fn get_offsets(&mut self, data: &[u8], offsets: &mut Vec<usize>) {
@@ -84,7 +102,8 @@ impl HevcParser {
                     };
                 }
                 _ => {
-                    println!("Non consumed data: {:?}", &data[consumed..]);    
+                    self.incomplete_nals.clear();
+                    self.incomplete_nals.extend_from_slice(&data[consumed..]);
                     return 
                 },
             }
@@ -176,14 +195,15 @@ impl HevcParser {
         }
 
         if parse_nal {
+            
             match nal.nal_type {
                 NAL_VPS => self.parse_vps()?,
                 NAL_SPS => self.parse_sps()?,
                 NAL_PPS => self.parse_pps()?,
 
-                NAL_TRAIL_R | NAL_TRAIL_N | NAL_TSA_N | NAL_TSA_R | NAL_STSA_N | NAL_STSA_R
+                NAL_TSA_N | NAL_TSA_R | NAL_STSA_N | NAL_STSA_R
                 | NAL_BLA_W_LP | NAL_BLA_W_RADL | NAL_BLA_N_LP | NAL_IDR_W_RADL | NAL_IDR_N_LP
-                | NAL_CRA_NUT | NAL_RADL_N | NAL_RADL_R | NAL_RASL_N | NAL_RASL_R => {
+                | NAL_CRA_NUT | NAL_RADL_N | NAL_RADL_R | NAL_RASL_N | NAL_RASL_R | NAL_IRAP_VCL22 | NAL_IRAP_VCL23 => {
                     self.parse_slice(&mut nal)?;
 
                     self.current_frame.nals.push(nal.clone());
@@ -207,6 +227,28 @@ impl HevcParser {
 
                     nal.decoded_frame_index = self.decoded_index;
                     self.current_frame.nals.push(nal.clone());
+
+                    unsafe {
+                        if nal.nal_type == NAL_VPS {
+                            (*self.key_frames)[0].clear();
+                            println!("CLEAR");
+                        }
+                        (*self.key_frames)[0].extend_from_slice(&[0,0,1]);
+                        (*self.key_frames)[0].extend_from_slice(&data[nal.start..nal.end]);
+                    }
+                    println!("INSERT: {:?}", nal.nal_type);
+                }
+                NAL_BLA_W_LP | NAL_BLA_W_RADL| NAL_BLA_N_LP | NAL_IDR_W_RADL | NAL_IDR_N_LP | NAL_CRA_NUT | NAL_IRAP_VCL22 | NAL_IRAP_VCL23 => {    
+                    println!("INSERT: {:?}", nal.nal_type);
+                    unsafe{
+                        (*self.key_frames)[0].extend_from_slice(&[0,0,1]);
+                        (*self.key_frames)[0].extend_from_slice(&data[nal.start..nal.end]);
+                        (*self.key_frames).swap(0, 1);
+                        (*self.key_frames)[0].clear();
+    
+                        let mut file = File::create("frame.h265")?;
+                        file.write(&(*self.key_frames)[1])?;
+                    }
                 }
                 _ => ()
             };
@@ -357,6 +399,7 @@ impl HevcParser {
         });
 
         self.presentation_index = offset;
+        self.ordered_frames.clear();
         self.ordered_frames.extend_from_slice(&self.frames);
         self.frames.clear();
     }
@@ -402,17 +445,32 @@ impl HevcParser {
 
     pub fn parse_nalunits(&mut self, data: &[u8]) {
         let mut offsets = vec![];
-        self.get_offsets(&data, &mut offsets);
+        // Prepend data with incomplete nals
+
+        // Does data have start code
+        // TODO: fix so that this is not needed
+        if self.incomplete_nals.len() > 0 && self.incomplete_nals[..2] != [0,0,1]
+        {
+            self.incomplete_nals.insert(0, 1);
+            self.incomplete_nals.insert(0, 0);
+            self.incomplete_nals.insert(0, 0);
+        }
+
+        let new_len = data.len() + self.incomplete_nals.len();
+        let mut new_data = Vec::with_capacity(new_len);
+        new_data.extend_from_slice(self.incomplete_nals.as_slice());
+        new_data.extend_from_slice(data);
+
+        self.get_offsets(&new_data.as_slice(), &mut offsets);
 
         if let Some(last_offset) = offsets.pop() {
-            let _x = self.split_nals(data, &offsets, last_offset, true);
+            let _ = self.split_nals(new_data.as_slice(), &offsets, last_offset, true);
         }
     }
 
     pub fn get_sps(&self) -> &Vec<SPSNAL> {
         &self.sps
     }
-
 }
 
 impl Default for NALUStartCode {
