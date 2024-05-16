@@ -276,5 +276,4 @@ impl SPSNAL {
         }
         None
     }
-
 }

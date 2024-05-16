@@ -99,7 +99,7 @@ impl HevcParser {
         data: &[u8],
         offsets: &[usize],
         last: usize,
-        parse_nals: bool,
+        parse_nals: &[u8],
     ) -> Result<Vec<NALUnit>> {
         let count = offsets.len();
 
@@ -134,7 +134,7 @@ impl HevcParser {
         data: &[u8],
         offset: usize,
         size: usize,
-        parse_nal: bool,
+        parse_nal: &[u8],
     ) -> Result<NALUnit> {
         let mut nal = NALUnit::default();
 
@@ -164,21 +164,22 @@ impl HevcParser {
         } else {
             3
         };
+        nal.nal_type = data[pos] >> 1;
 
-        if parse_nal {
+        let should_parse = parse_nal.contains(&nal.nal_type);
+
+        if should_parse {
             let bytes = clear_start_code_emulation_prevention_3_byte(&data[pos..parsing_end]);
             self.reader = BitVecReader::new(bytes);
 
             self.parse_nal_header(&mut nal)?;
-        } else {
-            nal.nal_type = data[pos] >> 1;
         }
 
         if nal.nuh_layer_id > 0 {
             return Ok(nal);
         }
 
-        if parse_nal {
+        if should_parse {
             match nal.nal_type {
                 NAL_VPS => self.parse_vps()?,
                 NAL_SPS => self.parse_sps()?,
@@ -424,7 +425,7 @@ impl HevcParser {
         &self.nals
     }
 
-    pub fn parse_nalunits(&mut self, data: &[u8]) {
+    pub fn parse_nalunits(&mut self, data: &[u8], parse_nals: &[u8]) {
         let mut offsets = vec![];
         // Prepend data with incomplete nals
 
@@ -436,7 +437,7 @@ impl HevcParser {
         self.get_offsets(new_data.as_slice(), &mut offsets);
 
         if let Some(last_offset) = offsets.pop() {
-            let _ = self.split_nals(new_data.as_slice(), &offsets, last_offset, true);
+            let _ = self.split_nals(new_data.as_slice(), &offsets, last_offset, parse_nals);
         }
     }
 
